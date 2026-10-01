@@ -97,5 +97,5 @@ node node/scripts/copy-templates.js   # -> node/templates (gitignored)
 ## Repo facts
 
 - Module path: `github.com/FairMind-Gen-AI-Studio/fairmind-cli`.
-- License: proprietary / private (`UNLICENSED` in `node/package.json`).
+- License: MIT (`LICENSE`, and `"license": "MIT"` in `node/package.json`), the same as the plugin repository.
 - Internal spec: `FairMind_Copilot_Bridge_Spec_v1.md`.

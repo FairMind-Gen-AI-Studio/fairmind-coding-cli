@@ -2,7 +2,7 @@
   "name": "fairmind-copilot-bridge",
   "version": "0.1.0-dev",
   "description": "FairMind CLI for GitHub Copilot and other shell agents (Node.js edition, zero dependencies)",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {

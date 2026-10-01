@@ -732,5 +732,4 @@ The plugin reads project-level configuration from:
 
 ## License
 
-MIT for the plugin. The `fairmind` CLI under `cli/` keeps its own licence terms
-(`cli/node/package.json`: `UNLICENSED`, proprietary).
+MIT, for the plugin and for the `fairmind` CLI under `cli/` (`cli/LICENSE`).
