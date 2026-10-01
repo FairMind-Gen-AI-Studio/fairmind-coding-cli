@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.fairmind.example/agent-api/v1/error.schema.json",
+  "title": "FairMind Agent API error envelope (v1)",
+  "type": "object",
+  "required": ["ok", "data", "error"],
+  "properties": {
+    "ok": { "const": false },
+    "data": { "type": "null" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "retryable", "details"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "e.g. TOKEN_MISSING, TOKEN_EXPIRED, TOKEN_INVALID, SCOPE_REQUIRED, ROLE_REQUIRED, SESSION_PRIVATE, RESOURCE_FORBIDDEN, PROJECT_NOT_FOUND, TASK_NOT_FOUND, REPOSITORY_NOT_FOUND, KNOWLEDGE_NOT_FOUND, REPOSITORY_AMBIGUOUS, PROJECT_REQUIRED, VALIDATION_ERROR, INVALID_STATE_TRANSITION, IDEMPOTENCY_CONFLICT, SERVICE_UNAVAILABLE, TIMEOUT" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object" }
+      }
+    }
+  }
+}

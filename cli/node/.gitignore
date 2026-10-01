@@ -1,0 +1,11 @@
+templates/
+*.tgz
+node_modules/
+
+# agent scaffolding accidentally generated in this dir during tests
+.github/
+.claude/
+.agents/
+.fairmind/
+CLAUDE.md
+AGENTS.md
