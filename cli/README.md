@@ -90,6 +90,12 @@ fairmind setup /path/to/repo --target claude,codex                   # a subset
 The Node edition provides the same as the `fairmind-setup` command. `--project`
 also writes a non-sensitive `.fairmind/config.json`.
 
+`setup` is for agents that run **without** the `fairmind-coding` plugin (the
+Copilot coding agent on GitHub, Copilot Chat in an IDE, Codex). With the plugin
+installed in Claude Code or Copilot CLI, skip it: `fairmind auth login` plus the
+plugin's `/fairmind-connect` writes `.fairmind/config.json`, and the plugin's own
+skills and agents already tell the model to use this CLI.
+
 ## Build
 
 Two editions share one behavior (verified by a parity harness). **Node is the

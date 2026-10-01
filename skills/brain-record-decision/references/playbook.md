@@ -4,6 +4,10 @@ On-demand detail for the `brain-record-decision` skill: the tool surface, the id
 payload each write door takes, how to read what comes back, and a worked example end to end.
 Read the parts a run actually needs.
 
+> **Transport.** Tools are named here by their MCP spelling (`mcp__Fairmind__<Tool>`). On the
+> CLI transport each one is `fairmind_cli.py tools call <Tool>` with the same arguments, as the
+> skill's own Transport note and the `fairmind-cli` skill describe; nothing below changes.
+
 ## The tool surface
 
 | Tool | Used for | Used here |

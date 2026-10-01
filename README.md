@@ -50,7 +50,7 @@ This repository ships the plugin **and** the `fairmind` CLI it can use instead o
 | `python-floor` | `SessionStart` | Says in one line when `python3` is missing, does not report its version, or is older than 3.9 (`◆ Fairmind Python: …`). The judge, criteria and insights hooks are `python3` programs whose wrappers swallow errors so they never block a session, so an interpreter too old to run them would otherwise leave them silently off. Plain bash, silent when the interpreter is recent enough, bounds its own probe of `python3` to two seconds, sends nothing anywhere, exits 0 on every path |
 | `session-start-insights` | `SessionStart` | The ambient capture gate, re-evaluated fresh every session: it fails closed unless this repo has a per-project Fairmind MCP configured, then consults the central plugin policy, then `.fairmind-insights.json`, where only `"ambient_capture": true` opts the repository in. On capture it registers the session and shows the one-time notice. It then spawns one detached, niced background pass that digests and delivers what is spooled and **refreshes the central plugin-policy cache** (the only outbound call for that policy — see [Central policy](#central-policy)). Fail-open, 5 s timeout; a virgin, non-Fairmind, not-opted-in or opted-out session registers nothing and shows no notice |
 | `session-end-insights` | `SessionEnd` | Stamps the end marker on this session's registry row; a no-op for a session that never captured |
-| `copilot-compat` | `PreToolUse` on `Bash`; `SessionStart` | GitHub Copilot CLI only (a no-op under Claude Code). On `Bash` it substitutes `${CLAUDE_PLUGIN_ROOT}`, which Copilot leaves literal in command and skill text. It pre-approves exactly what the commands' `allowed-tools` pre-approve: one `python3 <root>/scripts/<x>.py` call, never `pr_post.py`, `fairmind_connect.py` or a Fairmind write. At session start it gives the model the plugin root and the Claude-to-Copilot tool mapping |
+| `copilot-compat` | `PreToolUse` on `Bash`; `SessionStart` | GitHub Copilot CLI only (a no-op under Claude Code). On `Bash` it substitutes `${CLAUDE_PLUGIN_ROOT}`, which Copilot leaves literal in command and skill text. It pre-approves only what the commands' and skills' `allowed-tools` pre-approve (their union, read from the frontmatter): one `python3 <root>/scripts/<x>.py` call for a script listed there, never `pr_post.py`, `fairmind_connect.py` or a Fairmind write. Any other plugin script goes through Copilot's prompt. At session start it gives the model the plugin root and the Claude-to-Copilot tool mapping |
 | `copilot-block` | wraps `loop-check` and `check-journal` | Under Copilot CLI, turns their blocking exit 2 (only a warning there) into the `{"decision":"block"}` Copilot honours. Under Claude Code it execs the hook unchanged |
 | `capture-orchestrator-tokens` | `Stop` | The main thread's counterpart to `capture-subagent-tokens` — the orchestrator never fires `SubagentStop`, so its own token usage would otherwise go uncounted. Best-effort and never blocking |
 
@@ -592,7 +592,16 @@ fairmind auth status
 
 Then run `/fairmind-connect` in each checkout. With no per-project MCP entry it binds the
 repository through the CLI (`--via cli` forces it) and records `"fairmind_transport": "cli"`
-in `.fairmind/active-context.json`.
+in `.fairmind/active-context.json`. On either transport it also writes the bound project
+into `.fairmind/config.json`, the default the CLI sends when a call names no project.
+
+**`fairmind setup` is not needed with this plugin.** It scaffolds a stand-alone integration
+(a `fairmind-project-context` skill, a generic `fairmind` Copilot agent and an
+instructions block) for tools that run without the plugin: the Copilot coding agent on
+GitHub, Copilot Chat in an IDE, Codex. Under Claude Code or Copilot CLI with this plugin
+installed, `fairmind auth login` plus `/fairmind-connect` is the whole setup. Running
+`fairmind setup` too only adds a second, overlapping set of instructions and a generic agent
+next to the plugin's six.
 
 **What still needs the MCP entry.** The ambient session capture and the judge hook send
 through REST doors using the MCP entry's key, and the CLI never hands its key out. On a
@@ -608,6 +617,10 @@ The same repository installs in Copilot CLI (verified on 1.0.90):
 copilot plugin marketplace add FairMind-Gen-AI-Studio/fairmind-coding-cli   # or a local clone path
 copilot plugin install fairmind-coding@fairmind-coding-cli
 ```
+
+Then, in each checkout, `fairmind auth login` once per machine and `/fairmind-connect`.
+At session start the plugin tells Copilot to reach Fairmind through the CLI, so no MCP
+entry and no `fairmind setup` are needed.
 
 Nothing has to be exported before starting Copilot. Copilot reads the plugin's
 Claude-format hooks, skills, commands and agents, and five differences are handled
