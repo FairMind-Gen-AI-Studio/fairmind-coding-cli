@@ -57,6 +57,37 @@ the repository's root `.gitignore`.
 checkout to a repository returned by the platform catalog. A successful binding
 is recorded in `.fairmind/active-context.json`.
 
+Without a per-project MCP entry, and with a `fairmind` CLI resolvable
+(`scripts/fairmind_cli.py`), the same steps run through the CLI. The tenant and
+bind calls go through `Insights_get_tenant_health` and
+`Insights_bind_repository`, and the binding also carries
+`"fairmind_transport": "cli"`. The consent predicate (`_mcp_config.fairmind_configured`)
+is deliberately unchanged: the ambient and judge lanes need the MCP entry's key,
+so a CLI-only checkout never arms them.
+
+## GitHub Copilot CLI
+
+Copilot CLI loads this Claude-format plugin. Copilot reads
+`.github/plugin/plugin.json`, a generated copy of `.claude-plugin/plugin.json` with
+`"agents": "./copilot/agents/"`. Claude Code never reads that file. The adaptations
+are all keyed on `COPILOT_PLUGIN_ROOT`, which Copilot exports to plugin hooks and
+Claude Code does not, so the Claude Code path is unchanged:
+
+- `hooks/scripts/copilot-compat.py`: plugin-root substitution and pre-approval on
+  `Bash`, and the session context.
+- `hooks/scripts/copilot-block.sh`: exit 2 becomes `{"decision":"block"}` for
+  `loop-check` and `check-journal`.
+- `scripts/_copilot_host.py`: sub-agent session → agent. It reads the parent's
+  `events.jsonl` (`subagent.started`) lazily, because the line lands after
+  `SubagentStart` fires.
+- `validate-fairmind-path.sh` and `trace-op.sh` read apply_patch headers. Agent
+  identity uses `agent_display_name`, so a role is spelled as in Claude Code.
+- `scripts/sync_copilot_agents.py` regenerates `copilot/agents/`. Run it after
+  editing `agents/`.
+
+Hook matchers must not be empty strings: Copilot rejects the whole `hooks.json` for
+one, and with it every hook.
+
 ## Interactive mode vs loop mode
 
 Interactive work uses the role agents and journal. Loop mode additionally uses
