@@ -98,6 +98,7 @@ import audit_run_meta  # noqa: E402
 import _binding  # noqa: E402
 from _fm_ignore import makedirs_ignored  # noqa: E402
 from loop_open import _atomic_write_json  # noqa: E402
+import fairmind_cli  # noqa: E402
 
 #: The two doors this command speaks to, both REST, both on the SAME origin as
 #: the configured MCP url — derived from it by `_derive_insights_endpoint`,
@@ -365,6 +366,10 @@ def _how_to_configure(report, config=None, cwd=None):
     report.info("       `--scope local` writes projects[<this repo>] in ~/.claude.json.")
     report.info("       `--scope project` would commit the key into .mcp.json — do not.")
     report.info("    4. Re-run /fairmind-connect.")
+    report.info("  Or, without an MCP entry: install the `fairmind` CLI (./install-cli.sh in the")
+    report.info("  fairmind-coding-cli repository), run `fairmind auth login`, then")
+    report.info("  /fairmind-connect --via cli. Commands and skills then reach Fairmind through")
+    report.info("  the CLI; ambient capture still needs the MCP entry above.")
 
 
 def step_config(cwd, toplevel, report):
@@ -614,7 +619,16 @@ def step_tenant(endpoint, token, company, report):
         report.warn(f"tenant status unavailable ({exc.detail}) — continuing; the bind door "
                     "below is the real test")
         return True
+    return _report_tenant(answer, company, report)
 
+
+def _report_tenant(answer, company, report):
+    """Classify a tenant-status answer. Shared by the REST door and the CLI's
+    `Insights_get_tenant_health`, so both transports say the same thing."""
+    if not isinstance(answer, dict):
+        report.warn("the tenant status answer was not an object — continuing; the bind "
+                    "below is the real test")
+        return True
     ambient = answer.get("ambient")
     if ambient == "provisioned":
         report.ok("ambient capture is provisioned for this company")
@@ -732,6 +746,17 @@ def _has_authority(normalized):
 
 def step_bind(cwd, endpoint, token, project_id, branch, report):
     """POST the binding. Returns the answer dict, or raises DoorError."""
+    body = _bind_body(cwd, project_id, branch, report)
+    if body is None:
+        return None
+    url = S._derive_insights_endpoint(endpoint, _BIND_PATH)
+    return _call(url, token, body)
+
+
+def _bind_body(cwd, project_id, branch, report):
+    """The bind request, or None after a trap. Shared by both transports: the
+    origin checks below are about this checkout, not about how we reach the
+    door."""
     report.head("Repository")
     raw_remote = _git(cwd, "remote", "get-url", "origin")
     if not raw_remote:
@@ -773,9 +798,7 @@ def step_bind(cwd, endpoint, token, project_id, branch, report):
         # of it would be false. Nothing new goes on the wire and no stored row
         # is rewritten: the hash was already there, the join is what is new.
         body["tenancy"] = tenancy
-
-    url = S._derive_insights_endpoint(endpoint, _BIND_PATH)
-    return _call(url, token, body)
+    return body
 
 
 def report_bind_failure(exc, report):
@@ -910,7 +933,7 @@ def preflight_context(cwd, report):
     return ok
 
 
-def write_binding(cwd, answer, report):
+def write_binding(cwd, answer, report, transport="mcp"):
     """Read-merge-write `.fairmind/active-context.json`, preserving every key
     it already carries — including the ones this module knows nothing about.
 
@@ -945,6 +968,13 @@ def write_binding(cwd, answer, report):
     ctx[_binding.REPOSITORY_BRANCH] = answer.get("branch")
     ctx[_binding.BOUND_AT] = datetime.now(timezone.utc).replace(
         microsecond=0).isoformat()
+    # WHICH TRANSPORT made the binding, so a command can tell a CLI-connected
+    # checkout (no MCP entry, so no ambient capture) from an MCP-connected one.
+    # Absent means MCP: every binding written before the CLI path existed.
+    if transport == "cli":
+        ctx[_binding.TRANSPORT] = "cli"
+    else:
+        ctx.pop(_binding.TRANSPORT, None)
 
     makedirs_ignored(os.path.dirname(_binding.context_path(cwd)))
     _atomic_write_json(_binding.context_path(cwd), ctx)
@@ -1031,7 +1061,193 @@ def report_lanes(answer, report):
 # CLI
 # --------------------------------------------------------------------------- #
 
-def run(cwd, project_arg, branch_arg):
+# --------------------------------------------------------------------------- #
+# The CLI transport — the same steps, through the `fairmind` CLI.
+#
+# Used when this checkout has no per-project MCP entry but a `fairmind` CLI is
+# resolvable (`fairmind_cli.resolve`), or when `--via cli` asks for it. The CLI
+# holds its token in the OS credential store and never hands it out, so every
+# step goes through a tool call: `auth status` for the key, then
+# `Insights_get_tenant_health` and `Insights_bind_repository` — the MCP twins of
+# the two REST doors. The twins have no status codes, so the CLI's exit code
+# (docs/CLI.md) is mapped back onto the statuses `report_bind_failure` speaks.
+# --------------------------------------------------------------------------- #
+
+#: CLI exit code -> the HTTP status `report_bind_failure` branches on.
+_CLI_EXIT_TO_STATUS = {2: 401, 3: 404, 4: 403, 5: 400, 6: 409}
+_CLI_RETRYABLE = (7, 8)
+
+
+def _cli_error_detail(envelope):
+    error = envelope.get("error") if isinstance(envelope, dict) else None
+    if isinstance(error, dict) and error.get("message"):
+        return str(error["message"])
+    return "no detail"
+
+
+def _cli_key(report):
+    """`auth status` through the CLI. Returns `(exit, claims)`; exit 0 = usable."""
+    report.head("Fairmind CLI")
+    found = fairmind_cli.resolve()
+    if not found:
+        report.trap("no `fairmind` CLI was found. Install it with ./install-cli.sh from the "
+                    "fairmind-coding-cli repository (or put Node >= 20 on PATH so the copy "
+                    "bundled with this plugin can run), then re-run.")
+        return 1, {}
+    report.ok(f"{found['edition']} edition ({found['source']}): {found['path']}")
+    code, envelope, _stderr = fairmind_cli.run(["auth", "status", "--json"], timeout=45)
+    if code in _CLI_RETRYABLE:
+        report.trap(f"the platform did not answer ({_cli_error_detail(envelope)}) — network, "
+                    "VPN or the service being down. Nothing was changed; re-run when it answers.")
+        return 4, {}
+    if code != 0 or not isinstance(envelope, dict) or not envelope.get("ok"):
+        report.trap(f"the CLI has no usable key ({_cli_error_detail(envelope)}). Run "
+                    "`fairmind auth login` yourself (paste the project API key from Studio -> "
+                    "your avatar -> Developer) and re-run. Never paste the key into this chat.")
+        return 1, {}
+    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+    token = data.get("token") if isinstance(data.get("token"), dict) else {}
+    claims = token.get("claims") if isinstance(token.get("claims"), dict) else {}
+    server = data.get("server") if isinstance(data.get("server"), dict) else {}
+    report.ok(f"key from {token.get('source') or 'unknown source'}")
+    expires_at = claims.get("expires_at")
+    exp = None
+    if isinstance(expires_at, str):
+        try:
+            exp = datetime.strptime(expires_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            exp = None
+    if not _describe_expiry(exp, report):
+        return 1, claims
+    if not set(_write_scopes(claims)) & {"write", "admin"}:
+        report.warn("the key carries no `write`/`admin` scope claim — reads will work, but the "
+                    "write-back at the end of a loop or develop run will be refused")
+    if not server.get("ok"):
+        report.trap("the server did not accept the key — it is expired, revoked or for "
+                    "another backend (check FAIRMIND_MCP_URL / your CLI profile)")
+        return 1, claims
+    report.ok(f"server accepted the key ({server.get('projects_visible', '?')} project(s) visible)")
+    return 0, claims
+
+
+def _cli_tenant(report):
+    """Returns True when the connect may continue; raises nothing."""
+    report.head("Tenant")
+    code, envelope, _stderr = fairmind_cli.run(
+        ["tools", "call", "Insights_get_tenant_health", "--json"], timeout=45)
+    if code == 0 and isinstance(envelope, dict) and envelope.get("ok") \
+            and not fairmind_cli.is_refusal(envelope.get("data")):
+        return _report_tenant(envelope.get("data"), None, report)
+    if code == 2:
+        report.trap(f"the project key was refused ({_cli_error_detail(envelope)})")
+        return False
+    report.warn(f"tenant status unavailable ({_cli_error_detail(envelope)}) — continuing; "
+                "the bind below is the real test")
+    return True
+
+
+def _local_project(cwd):
+    """The project the CLI itself will send when none is named: FAIRMIND_PROJECT,
+    then the repository's `.fairmind/config.json` (docs/CLI.md precedence)."""
+    env = os.environ.get("FAIRMIND_PROJECT", "").strip()
+    if env:
+        return env
+    try:
+        with open(os.path.join(cwd, ".fairmind", "config.json"), encoding="utf-8") as handle:
+            cfg = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    project = cfg.get("project") if isinstance(cfg, dict) else None
+    return project if isinstance(project, str) and project.strip() else None
+
+
+def run_cli(cwd, project_arg, branch_arg):
+    report = Report()
+    code, _claims = _cli_key(report)
+    if code:
+        report.flush()
+        return code
+    if not _cli_tenant(report):
+        report.flush()
+        return 1
+    if not preflight_context(cwd, report):
+        report.flush()
+        return 1
+
+    branch = branch_arg or _current_branch(cwd)
+    body = _bind_body(cwd, project_arg, branch, report)
+    if body is None:
+        report.flush()
+        return 1
+    args = {"git_remote": body["gitRemote"]}
+    for wire, name in (("projectId", "project_id"), ("branch", "branch"), ("tenancy", "tenancy")):
+        if body.get(wire):
+            args[name] = body[wire]
+    code, envelope, _stderr = fairmind_cli.run(
+        ["tools", "call", "Insights_bind_repository", "--args-file", "-", "--yes", "--json"],
+        stdin_text=json.dumps(args))
+    if code in _CLI_RETRYABLE:
+        report.trap(f"the platform could not answer right now ({_cli_error_detail(envelope)}). "
+                    "Nothing was changed; re-run in a moment.")
+        report.flush()
+        return 4
+    if code != 0 or not isinstance(envelope, dict) or not envelope.get("ok"):
+        report_bind_failure(DoorError(_CLI_EXIT_TO_STATUS.get(code, 500),
+                                      _cli_error_detail(envelope)), report)
+        report.flush()
+        return 1
+    answer = envelope.get("data")
+    if fairmind_cli.is_refusal(answer):
+        if not project_arg and not _local_project(cwd):
+            report.head("Project")
+            report.info(f"the platform answered: {answer['message']}")
+            report.info("no project was named and the key may not be scoped to one, so the "
+                        "project to bind within must be named: re-run with --project <id>.")
+            report.flush()
+            return 3
+        report_bind_failure(DoorError(400, answer["message"]), report)
+        report.flush()
+        return 1
+    if not isinstance(answer, dict):
+        report.trap("the bind answered with something that is not an object — a contract "
+                    "drift between this plugin and the platform; report it with the plugin version.")
+        report.flush()
+        return 1
+    if not validate_binding(answer, project_arg or answer.get("project_id"), report):
+        report.flush()
+        return 1
+    if not write_binding(cwd, answer, report, transport="cli"):
+        report.flush()
+        return 1
+    report_binding(answer, branch, report)
+    report_lanes(answer, report)
+    report.info("")
+    report.info("Connected through the `fairmind` CLI. Commands and skills call Fairmind through "
+                "it; the ambient capture and judge hooks still need a per-project MCP entry and "
+                "stay off without one (`/fairmind-config` shows their state).")
+    report.flush()
+    return 1 if report.traps else 0
+
+
+def run(cwd, project_arg, branch_arg, via="auto"):
+    toplevel, _common = S._git_rev_parse(cwd)
+    if not toplevel:
+        sys.stderr.write("fairmind_connect: not a git work tree — a Fairmind consumer is "
+                         "always a git repository\n")
+        return 1
+    if via == "auto":
+        # A per-project MCP entry wins: the capture lanes send with ITS key, so
+        # the binding they key on must be made with that same key. Without one,
+        # a resolvable CLI is the transport.
+        if not S.fairmind_configured(cwd, toplevel) and fairmind_cli.is_available():
+            via = "cli"
+    if via == "cli":
+        return run_cli(toplevel, project_arg, branch_arg)
+    return run_mcp(cwd, project_arg, branch_arg)
+
+
+def run_mcp(cwd, project_arg, branch_arg):
     report = Report()
     toplevel, _common = S._git_rev_parse(cwd)
     if not toplevel:
@@ -1136,9 +1352,13 @@ def main(argv=None):
     parser.add_argument("--branch", default=None,
                         help="which catalog row to bind, when a url has several (defaults "
                              "to this checkout's current branch)")
+    parser.add_argument("--via", choices=("auto", "mcp", "cli"), default="auto",
+                        help="how to reach Fairmind: the per-project MCP entry, the `fairmind` "
+                             "CLI, or auto (the MCP entry when this checkout has one, else the "
+                             "CLI when it is installed)")
     parser.add_argument("--cwd", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    return run(args.cwd or os.getcwd(), args.project, args.branch)
+    return run(args.cwd or os.getcwd(), args.project, args.branch, args.via)
 
 
 if __name__ == "__main__":
