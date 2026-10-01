@@ -981,6 +981,52 @@ def write_binding(cwd, answer, report, transport="mcp"):
     return True
 
 
+def write_project_config(cwd, project_id, report):
+    """Record the bound project in `.fairmind/config.json`, the file the
+    `fairmind` CLI reads when a call names no project.
+
+    Commands and skills reach Fairmind through the CLI whenever it is usable,
+    on either transport of this command, and a brain or Studio call that omits
+    the project is refused with `PROJECT_REQUIRED` as soon as the key sees more
+    than one. Without this file only `fairmind setup --project` wrote it, so a
+    checkout connected here still failed those calls.
+
+    Only `project` is added; every other key is kept. A file that already names
+    a DIFFERENT project is left alone and reported: which one is right is the
+    developer's call, not this command's. Never fatal — the binding is made."""
+    if not project_id:
+        return
+    path = os.path.join(cwd, ".fairmind", "config.json")
+    cfg = {}
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                cfg = json.load(handle)
+        except (OSError, ValueError):
+            cfg = None
+        if not isinstance(cfg, dict):
+            report.warn(".fairmind/config.json is not a JSON object — left as is; the "
+                        "`fairmind` CLI will not know this checkout's project from it")
+            return
+        current = cfg.get("project")
+        if current == project_id:
+            return
+        if isinstance(current, str) and current.strip():
+            report.warn(f".fairmind/config.json names project {current}, not the bound "
+                        f"{project_id} — left as is. The `fairmind` CLI sends {current} "
+                        "when a call names none; change the file if that is wrong.")
+            return
+    cfg["project"] = project_id
+    try:
+        makedirs_ignored(os.path.dirname(path))
+        _atomic_write_json(path, cfg)
+    except OSError as exc:
+        report.warn(f"could not write .fairmind/config.json ({exc}) — the `fairmind` CLI "
+                    "will need --project or FAIRMIND_PROJECT on this checkout")
+        return
+    report.ok(f".fairmind/config.json records project {project_id} for the `fairmind` CLI")
+
+
 def report_binding(answer, checkout_branch, report):
     report.head("Bound")
     name = answer.get("name") or "?"
@@ -1220,6 +1266,7 @@ def run_cli(cwd, project_arg, branch_arg):
     if not write_binding(cwd, answer, report, transport="cli"):
         report.flush()
         return 1
+    write_project_config(cwd, answer.get("project_id"), report)
     report_binding(answer, branch, report)
     report_lanes(answer, report)
     report.info("")
@@ -1335,6 +1382,7 @@ def run_mcp(cwd, project_arg, branch_arg):
     if not write_binding(cwd, answer, report):
         report.flush()
         return 1
+    write_project_config(cwd, answer.get("project_id"), report)
     report_binding(answer, branch, report)
     report_lanes(answer, report)
     report.flush()

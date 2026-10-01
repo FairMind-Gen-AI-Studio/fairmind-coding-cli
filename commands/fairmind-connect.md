@@ -30,6 +30,14 @@ made with the same key. Those lanes stay off on a CLI-only checkout.
 `.fairmind/active-context.json`, which is gitignored, so each teammate runs this
 in their own clone.
 
+**It also tells the CLI which project this is.** On either transport the bound
+project id goes into `.fairmind/config.json` (only its `project` key; anything
+else there is kept), which the `fairmind` CLI sends whenever a call names no
+project. That is what keeps the brain skills and free-form calls from failing
+with `PROJECT_REQUIRED` on a key that sees several projects, and it is why this
+command, not `fairmind setup`, is the step a plugin user runs. A file that
+already names a different project is left alone and the report says so.
+
 ## Step 1 — run it
 
 ```bash
