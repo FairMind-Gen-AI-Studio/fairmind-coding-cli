@@ -20,9 +20,14 @@ MODES
             names a file that exists under it (an occurrence that does not is
             another plugin's, and the command is left alone).
             Copilot asks the user before running a rewritten command unless the
-            hook also says "allow". It says so only for the shape Claude Code's
+            hook also says "allow". It says so only for what Claude Code's
             `allowed-tools` lines pre-approve: one `python3 <root>/scripts/<x>.py
-            …` invocation with no shell operators, substitutions or redirections.
+            …` invocation with no shell operators, substitutions or redirections,
+            where `<x>.py` is named by a `Bash(python3 …/scripts/<x>.py[:*])`
+            entry in the frontmatter of one of the plugin's commands or skills
+            (read from disk, so the list cannot drift from them). An entry
+            without `:*` approves the bare call only, as in Claude Code. Any
+            other script of the plugin goes through Copilot's own prompt.
             A call that writes outside this machine is still asked for:
             `pr_post.py` (GitHub), `fairmind_connect.py` (the bind) and
             `fairmind_cli.py` with `--yes` or `--send` (a Fairmind write).
@@ -107,6 +112,48 @@ def _plain(command):
     return not single and not double
 
 
+#: One `Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/<x>.py[:*])` frontmatter
+#: entry: the script name, and whether arguments are allowed (`:*`).
+_ALLOWED_ENTRY = re.compile(
+    r'Bash\(python3 "\$\{CLAUDE_PLUGIN_ROOT\}"/scripts/([A-Za-z0-9_]+\.py)(:\*)?\)')
+
+
+def _frontmatter(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return ""
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    return text[3:end] if end != -1 else ""
+
+
+def preapproved(root):
+    """{script name: arguments allowed} for every script a command or skill of
+    this plugin pre-approves in its frontmatter. Under Claude Code each command
+    approves only its own entries; Copilot gives a hook no way to know which
+    command is running, so this is their union — never wider than it."""
+    allowed = {}
+    paths = []
+    for sub, pattern in (("commands", None), ("skills", "SKILL.md")):
+        base = os.path.join(root, sub)
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            continue
+        for name in names:
+            if pattern:
+                paths.append(os.path.join(base, name, pattern))
+            elif name.endswith(".md"):
+                paths.append(os.path.join(base, name))
+    for path in paths:
+        for match in _ALLOWED_ENTRY.finditer(_frontmatter(path)):
+            allowed[match.group(1)] = allowed.get(match.group(1), False) or bool(match.group(2))
+    return allowed
+
+
 def auto_allow(command, root):
     if not _plain(command):
         return False
@@ -126,7 +173,10 @@ def auto_allow(command, root):
         return False
     if name == "fairmind_cli.py" and _FAIRMIND_WRITE_FLAGS & set(argv[2:]):
         return False
-    return True
+    allowed = preapproved(root)
+    if name not in allowed:
+        return False
+    return allowed[name] or len(argv) == 2
 
 
 def pretool(payload, root):
