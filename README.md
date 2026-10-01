@@ -1,6 +1,8 @@
 # fairmind-coding
 
-Coding workflow plugin for Claude Code. Six role-based agents, plus skills, hooks and commands rostered by name in the tables below rather than counted here — among them a front desk (`/fairmind-coding`) that menus the toolkit, a human-driven team mode (`/fairmind-develop`), and an opt-in **loop mode** (`/fairmind-loop`) with a machine-checkable stop condition. **Runs standalone on any repo, zero-config**; the Fairmind MCP and the `.fairmind/` session workspace produced by Fairmind AI Studio are optional and only enable connected mode.
+Coding workflow plugin for Claude Code and GitHub Copilot CLI. Six role-based agents, plus skills, hooks and commands rostered by name in the tables below rather than counted here — among them a front desk (`/fairmind-coding`) that menus the toolkit, a human-driven team mode (`/fairmind-develop`), and an opt-in **loop mode** (`/fairmind-loop`) with a machine-checkable stop condition. **Runs standalone on any repo, zero-config**; Fairmind (reached through the bundled `fairmind` CLI or the Fairmind MCP) and the `.fairmind/` session workspace produced by Fairmind AI Studio are optional and only enable connected mode.
+
+This repository ships the plugin **and** the `fairmind` CLI it can use instead of a Fairmind MCP server (`cli/`). See [Fairmind through the CLI](#fairmind-through-the-cli).
 
 ## What's included
 
@@ -19,6 +21,7 @@ Coding workflow plugin for Claude Code. Six role-based agents, plus skills, hook
 
 | Skill | When to load |
 |---|---|
+| `fairmind-cli` | Reaching Fairmind through the `fairmind` CLI: picking the transport (CLI first, MCP otherwise), the one rule that turns an `mcp__Fairmind__<Tool>` step into a CLI call, reading the JSON envelope and exit codes, confirming writes |
 | `fairmind-context` | Pulling project / session / user-story / requirements / test context from the Fairmind platform |
 | `fairmind-tdd` | Implementing features against Fairmind acceptance criteria with journal traceability |
 | `fairmind-code-review` | Reviewing implementation work — plan→journal→code traceability |
@@ -47,6 +50,8 @@ Coding workflow plugin for Claude Code. Six role-based agents, plus skills, hook
 | `python-floor` | `SessionStart` | Says in one line when `python3` is missing, does not report its version, or is older than 3.9 (`◆ Fairmind Python: …`). The judge, criteria and insights hooks are `python3` programs whose wrappers swallow errors so they never block a session, so an interpreter too old to run them would otherwise leave them silently off. Plain bash, silent when the interpreter is recent enough, bounds its own probe of `python3` to two seconds, sends nothing anywhere, exits 0 on every path |
 | `session-start-insights` | `SessionStart` | The ambient capture gate, re-evaluated fresh every session: it fails closed unless this repo has a per-project Fairmind MCP configured, then consults the central plugin policy, then `.fairmind-insights.json`, where only `"ambient_capture": true` opts the repository in. On capture it registers the session and shows the one-time notice. It then spawns one detached, niced background pass that digests and delivers what is spooled and **refreshes the central plugin-policy cache** (the only outbound call for that policy — see [Central policy](#central-policy)). Fail-open, 5 s timeout; a virgin, non-Fairmind, not-opted-in or opted-out session registers nothing and shows no notice |
 | `session-end-insights` | `SessionEnd` | Stamps the end marker on this session's registry row; a no-op for a session that never captured |
+| `copilot-compat` | `PreToolUse` on `Bash`; `SessionStart` | GitHub Copilot CLI only (a no-op under Claude Code). On `Bash` it substitutes `${CLAUDE_PLUGIN_ROOT}`, which Copilot leaves literal in command and skill text. It pre-approves only what the commands' and skills' `allowed-tools` pre-approve (their union, read from the frontmatter): one `python3 <root>/scripts/<x>.py` call for a script listed there, never `pr_post.py`, `fairmind_connect.py` or a Fairmind write. Any other plugin script goes through Copilot's prompt. At session start it gives the model the plugin root and the Claude-to-Copilot tool mapping |
+| `copilot-block` | wraps `loop-check` and `check-journal` | Under Copilot CLI, turns their blocking exit 2 (only a warning there) into the `{"decision":"block"}` Copilot honours. Under Claude Code it execs the hook unchanged |
 | `capture-orchestrator-tokens` | `Stop` | The main thread's counterpart to `capture-subagent-tokens` — the orchestrator never fires `SubagentStop`, so its own token usage would otherwise go uncounted. Best-effort and never blocking |
 
 ### Commands
@@ -96,7 +101,7 @@ Fairmind's take on loop engineering is a foundation plus four concentric loops, 
 ● design-time on FairMind: 0 · 3 · 4            ● runtime in Claude Code: 1 · 2
 ```
 
-- **0 · Foundation** — Evidence Collection (code, logs, DB, UI) builds the **Project Context** once, up front: a loop iterating on the wrong context converges on the wrong answer. Connected mode pulls it through the Fairmind MCP (`fairmind-context` skill); standalone mode approximates it from the local repo.
+- **0 · Foundation** — Evidence Collection (code, logs, DB, UI) builds the **Project Context** once, up front: a loop iterating on the wrong context converges on the wrong answer. Connected mode pulls it through the `fairmind` CLI or the Fairmind MCP (`fairmind-context` skill); standalone mode approximates it from the local repo.
 - **1 · Agent turn (≈ minutes)** — the harness. The plugin configures it: hooks fire at key lifecycle points, skills put written conventions in front of the agent on every run, and a subagent gives a second opinion — the writer never approves their own work.
 - **2 · Task (≈ hours)** — the loop `/fairmind-loop` drives. Exit turns on **two questions**, neither of them the maker's to answer, and **since 2026-08-24 the engine gates on both**:
   - the **binary oracle** — the executed gate (`run_gate_checks.py`): acceptance checks pass or fail with no interpretation, and stay valid across refactors because they never look at the implementation. It answers: *does it work?*
@@ -123,7 +128,7 @@ See the `fairmind-gate` skill for the check types and descriptor contract, and `
 
 ## Standalone vs connected
 
-The plugin installs and runs with **zero MCP servers**. In **standalone mode** (the default when no Fairmind workspace is present), the Technical Lead bootstraps a minimal `.fairmind/active-context.json`, asks once whether a Fairmind workspace exists, and drives loop mode entirely from local `.fairmind/` files (contracts, `loop-state.json`, journals) — the executed gate, admission, budget, and human gate all work with nothing but `git`, `python3`, and `bash`. In **connected mode** (`fairmind: "configured"`, which `/fairmind-connect` establishes and verifies rather than asserting), the Fairmind MCP adds platform context (projects, stories, requirements, tests, RAG), while Playwright and MongoDB MCP enable the QA/frontend and MongoDB-stack workflows. Every agent degrades gracefully: absent MCP tools mean it reads the local equivalents and operates standalone — absence of Fairmind is a mode, not an error. Connected mode is not only inbound: records also go **out**, by more than one route — *What leaves your machine* below describes each route and states how that list was built.
+The plugin installs and runs with **zero MCP servers**. In **standalone mode** (the default when no Fairmind workspace is present), the Technical Lead bootstraps a minimal `.fairmind/active-context.json`, asks once whether a Fairmind workspace exists, and drives loop mode entirely from local `.fairmind/` files (contracts, `loop-state.json`, journals) — the executed gate, admission, budget, and human gate all work with nothing but `git`, `python3`, and `bash`. In **connected mode** (`fairmind: "configured"`, which `/fairmind-connect` establishes and verifies rather than asserting), Fairmind adds platform context (projects, stories, requirements, tests, RAG), reached through the bundled `fairmind` CLI when it is usable and through the Fairmind MCP otherwise, while Playwright and MongoDB MCP enable the QA/frontend and MongoDB-stack workflows. Every agent degrades gracefully: with neither the CLI nor the Fairmind MCP it reads the local equivalents and operates standalone — absence of Fairmind is a mode, not an error. Connected mode is not only inbound: records also go **out**, by more than one route — *What leaves your machine* below describes each route and states how that list was built.
 
 ## Agent signature on pull requests
 
@@ -173,7 +178,7 @@ One declared capability **used to be** named here without being described as a r
 
 ### Lane 1 — the loop lane: three Insights doors
 
-**What it sends.** A flush step assembles payloads out of what has been left under `.fairmind/` — a loop's record, the agents' decision log, a `/harness-audit` run — and each goes through its own Fairmind MCP tool. The content is **derived from your repository** and is not anonymized — paths and prose travel as they were written:
+**What it sends.** A flush step assembles payloads out of what has been left under `.fairmind/` — a loop's record, the agents' decision log, a `/harness-audit` run — and each goes through its own Fairmind tool, called through the `fairmind` CLI or the Fairmind MCP. The content is **derived from your repository** and is not anonymized — paths and prose travel as they were written:
 
 | Door | What it carries |
 |---|---|
@@ -181,13 +186,13 @@ One declared capability **used to be** named here without being described as a r
 | `Insights_record_agent_decisions` | Your **repository name** and your **`origin` remote URL** in plaintext — credentials are stripped out of the URL; the host, the organization and the repository name are not — and, per decision, **the free prose an agent wrote**: a title and a rationale, in whatever words it chose, alongside repo-relative **file paths** and **function names with their line numbers** |
 | `Insights_record_harness_audit` | A `/harness-audit` run: repository name, commit sha, `origin` remote URL, and the per-criterion verdicts |
 
-⚠️ **Only one of those three doors is tied to a loop, and the lane's name is misleading about the other two.** `Insights_record_loop_stats` carries a loop's record. The other two need no loop to exist: `/harness-audit` has **no loop precondition at all** — its flush is gated only on the Fairmind MCP being reachable — and the decision log the agents append to is a top-level convention in `agents/software-engineer.md`, `agents/tech-lead.md` and `agents/qa-engineer.md`, a *sibling* of their loop-mode sections rather than something nested inside them, which `/fairmind-sync-insights` describes in its own frontmatter as running *independent of a loop close*. `/fairmind-develop`, which runs no gate and closes no loop, declares `Insights_record_agent_decisions` too. So a repository that never runs loop mode still has two of these three doors open to it.
+⚠️ **Only one of those three doors is tied to a loop, and the lane's name is misleading about the other two.** `Insights_record_loop_stats` carries a loop's record. The other two need no loop to exist: `/harness-audit` has **no loop precondition at all** — its flush is gated only on Fairmind being reachable (through the CLI or the MCP) — and the decision log the agents append to is a top-level convention in `agents/software-engineer.md`, `agents/tech-lead.md` and `agents/qa-engineer.md`, a *sibling* of their loop-mode sections rather than something nested inside them, which `/fairmind-sync-insights` describes in its own frontmatter as running *independent of a loop close*. `/fairmind-develop`, which runs no gate and closes no loop, declares `Insights_record_agent_decisions` too. So a repository that never runs loop mode still has two of these three doors open to it.
 
 **When.** The flush is a step somebody runs, not something the plugin does on a timer or a schedule: it is the last step of `/fairmind-loop`'s Exit, the last step of a `/harness-audit` run, and the whole of `/fairmind-sync-insights`, which you can run at any time.
 
 ⚠️ **A running loop's record is not held back until it closes.** `/fairmind-sync-insights` applies **no status filter** — it emits whatever is on disk. Measured on the shipped CLI against a repo whose `loop-state.json` still read `"status": "running"`: `insights_flush_payload.py --emit loop` returned a payload carrying that status verbatim, alongside `loop_id`, `target_ref`, `task_ref`, `project_id`, `owner_session`, `started_at`, the check count and the iteration count. So a sync run mid-loop sends the loop as it stands, and so does one run over the residue a crash, a `kill` or a hand close left behind — which is the ordinary way a loop ends up non-terminal.
 
-**Precondition.** A Fairmind MCP tool reachable in that session — and that is the whole precondition. The plugin's own script opens no network connection: it builds the payload, writes it to a file, and the *model* makes the MCP call. With no Fairmind MCP connected the payloads stay on disk unflushed, and the next `/fairmind-sync-insights` sends them. This lane applies no scope check of its own, so unlike the ambient lane below it does not distinguish a Fairmind entry configured for *this project* from one configured for your user account.
+**Precondition.** Fairmind reachable in that session, through the `fairmind` CLI (`fairmind_cli.py --probe --online` exits 0) or a Fairmind MCP tool — and that is the whole precondition. The flush script opens no network connection: it builds the payload and writes it to a file. The *model* then makes the call, either as an MCP tool call or through `fairmind_cli.py --send`. With neither available the payloads stay on disk unflushed, and the next `/fairmind-sync-insights` sends them. This lane applies no scope check of its own, so unlike the ambient lane below it does not distinguish a Fairmind entry configured for *this project* from one configured for your user account. **The CLI's key is a user-level credential** (OS credential store, `fairmind auth login`): with it, this lane is open in every repository where somebody runs the flush.
 
 ### Lane 2 — ambient session records
 
@@ -206,7 +211,7 @@ One declared capability **used to be** named here without being described as a r
 
 One thing it *does* name: **tool names ship whole**, so an MCP tool arrives spelled `mcp__<server>__<tool>` — any MCP server whose tools were actually called is named by the rows (a configured-but-unused server is not).
 
-**When.** At session start, in a detached background process, which delivers the sessions that have already **ended**. In practice a session is sent when the next one opens, not while it runs.
+**When.** At session start, in a detached background process, which delivers the sessions that have already **ended**. The `fairmind` CLI never opens this lane: it needs the per-project MCP entry's own credential. In practice a session is sent when the next one opens, not while it runs.
 
 **Precondition.** A Fairmind MCP entry configured **for this project** — an entry configured for your user account does not count — **and** the repository's opt-in: the repo-root `.fairmind-insights.json` carrying `"ambient_capture": true`, unless the platform's central policy forces capture on. Without the opt-in no new session is captured. ⚠️ **The opt-in decides which sessions are recorded, not whether ones already recorded are delivered:** sessions recorded earlier — including under the former default, when capture ran wherever a per-project MCP was configured — are still digested and delivered while this project has a reachable Fairmind server. Delivery narrows what it sends by the consent classes below, but it does not stop for this switch. The gate is re-evaluated every session, so a change to that file takes effect on the next one.
 
@@ -214,20 +219,20 @@ One thing it *does* name: **tool names ship whole**, so an MCP tool arrives spel
 
 ### The Studio write-back — not a capture lane
 
-**What it sends.** Two Fairmind MCP calls, attempted independently so a failure in one never masks the other:
+**What it sends.** Two Fairmind calls (through the `fairmind` CLI or the Fairmind MCP), attempted independently so a failure in one never masks the other:
 
 - `Studio_bulk_update_status(ids=[<task_id>], status="passed", entity_type="task")` — the Studio task id and a status word. Nothing derived from your code.
 - `Studio_process_journal(task_id=…, journal_content=…, project_id=…)` — and `journal_content` is **the journals' file contents**, not a path. Verbatim from `commands/fairmind-loop.md`: *"read every `${FAIRMIND_BASE}/journals/<taskRef>_*.md` matching this task ref (concatenating them when more than one agent journaled) and pass the combined text"*. The journals are the narrative **why** — free prose an agent wrote about your codebase, its problems and its decisions. What matters about this call is a property rather than a ranking, and the property is that the text is **unbounded and verbatim**: no schema constrains what a journal may contain, so whatever an agent wrote about your code is what gets sent. `/fairmind-loop` and `/fairmind-develop` are the two commands that make it.
 
 **When.** Only after a **human approves** — never on a green gate. `/fairmind-loop`'s Exit fires it once you approve a `passed_pending_human` loop; `/fairmind-develop`'s Exit asks for it as a **second, separate request** after you approve the run. It is per **task** and driven by a person, not per session and not on a schedule, and the model makes the calls.
 
-**Precondition.** The Fairmind MCP connected with both `Studio_*` tools present, plus `editor+` on the project. A missing tool or a denied write does not fail the close — each is reported as *not synced* in the Exit report.
+**Precondition.** Fairmind reachable through the CLI or the MCP with both `Studio_*` tools present, plus `editor+` on the project and, on the CLI, a key with a `write` scope. A missing tool or a denied write does not fail the close — each is reported as *not synced* in the Exit report.
 
 **No on-disk queue, and that cuts both ways.** Unlike the insights flush there is no payload written to disk and no cursor: nothing sits on your machine waiting to be sent, and a call that never happened is never picked up later. The only recovery named is re-running the loop to its approved Exit.
 
 ### The brain write-back — not a capture lane
 
-**What it sends.** Fairmind MCP calls, opened by seven different things. `Brain_record_requirement`, made only by the two requirement skills — `brain-rebuild-requirements` and `brain-new-requirement` — and only when a person runs one of them. `Brain_add_document`, made by the `brain-add-document` skill and on the same terms; its payload is not a draft, so it has its own paragraph below. The same door is opened by `brain-onboard` when a person asks it to write a project brief — a document of one particular kind, whose different bound gets a paragraph of its own. `Brain_record_decision`, `Brain_record_issue` and `Brain_supersede_decision`, made by the `brain-record-decision` skill when a person asks for it — the only caller of the third — with a paragraph of their own below. `Brain_record_component`, made only by the `brain-extract-components` skill when a person asks for it, with a paragraph of its own below. And, since 2026-09-12, `Brain_record_decision` and `Brain_record_issue`, made by `/fairmind-loop` at its final human gate, **after** you approve a `passed_pending_human` loop and never on a green gate alone. The seventh is `/fairmind-sync-insights`, which makes `Brain_record_decision` whenever somebody runs it, in any session and with no loop: it proposes every decision the agents logged on disk and typed `architecture` that no earlier run proposed — the loop half's rows, through the same door and with the same payload — and it asks for **no approval** before it sends; once somebody runs it with the Fairmind MCP connected, the `brain` switch is the only thing that stops the send. Each requirement call carries a requirement **as the agent drafted it**, plus the evidence under it:
+**What it sends.** Fairmind calls (through the `fairmind` CLI or the Fairmind MCP), opened by seven different things. `Brain_record_requirement`, made only by the two requirement skills — `brain-rebuild-requirements` and `brain-new-requirement` — and only when a person runs one of them. `Brain_add_document`, made by the `brain-add-document` skill and on the same terms; its payload is not a draft, so it has its own paragraph below. The same door is opened by `brain-onboard` when a person asks it to write a project brief — a document of one particular kind, whose different bound gets a paragraph of its own. `Brain_record_decision`, `Brain_record_issue` and `Brain_supersede_decision`, made by the `brain-record-decision` skill when a person asks for it — the only caller of the third — with a paragraph of their own below. `Brain_record_component`, made only by the `brain-extract-components` skill when a person asks for it, with a paragraph of its own below. And, since 2026-09-12, `Brain_record_decision` and `Brain_record_issue`, made by `/fairmind-loop` at its final human gate, **after** you approve a `passed_pending_human` loop and never on a green gate alone. The seventh is `/fairmind-sync-insights`, which makes `Brain_record_decision` whenever somebody runs it, in any session and with no loop: it proposes every decision the agents logged on disk and typed `architecture` that no earlier run proposed — the loop half's rows, through the same door and with the same payload — and it asks for **no approval** before it sends; once somebody runs it with Fairmind reachable, the `brain` switch is the only thing that stops the send. Each requirement call carries a requirement **as the agent drafted it**, plus the evidence under it:
 
 | What travels | Detail |
 |---|---|
@@ -314,7 +319,7 @@ write step near their end, `brain-add-document` once for the document it was ask
 For the loop: only after a human approves a `passed_pending_human` loop, in the same block
 as the Studio write-back and on the same terms. For `/fairmind-sync-insights`: whenever somebody runs it, with no approval asked. Every requirement, decision, issue and component this route writes is recorded as a **proposal** for a person to confirm or reject on the platform; the requirement skills, `brain-record-decision` and `brain-extract-components` confirm nothing themselves and each says so in the output it prints. **A document is the exception: it is filed, not proposed.** Only a change to a card a person had already confirmed comes back as a proposal. **A supersession is half an exception:** the replacement is recorded as a proposal, but the decision it replaces stops being current the moment the call lands — marked superseded, still readable in its history — without waiting for anybody. **A brief is one document per scope** — one per project, one for the company — so writing it again rewrites a draft nobody has confirmed yet, and a regenerated brief a person had already confirmed arrives as a revision proposal carrying the old and the new text, while the confirmed one keeps being served.
 
-**Precondition.** The Fairmind MCP connected for this project with the `Brain_*` tools present — a server older than the platform release that serves them exposes no such tool, and the skills stop rather than degrade — plus a tenant provisioned for brain writes. **No switch reaches the skills half of this route, and the reason it needs none is that its trigger is a person:** the two lanes above fire on a session opening or a flush somebody runs for other reasons, while this door opens only because the skill was asked for by name. Not running the skills is the whole control. **Two things differ for `brain-add-document`.** Its tool, `Brain_add_document`, arrives with a later platform release than the other `Brain_*` tools, so it checks for that one by name and stops without it. And it is the one skill here an agent may start on its own, when a document comes up in a session — which is why it asks before it sends, as described under the controls below. `brain-onboard` checks for its own read door, `Brain_overview`, the same way — it too arrives with a later release — and for `Brain_add_document` before it writes. **`brain-extract-components` shares the first of those:** `Brain_record_component` also arrives with a later platform release, so the skill checks for it by name and stops without it. It also needs the repository bound to the checkout by `/fairmind-connect`, because every directory it sends is resolved in that one repository.
+**Precondition.** Fairmind reachable for this project, through the CLI or the MCP, with the `Brain_*` tools present — a server older than the platform release that serves them exposes no such tool, and the skills stop rather than degrade — plus a tenant provisioned for brain writes. **No switch reaches the skills half of this route, and the reason it needs none is that its trigger is a person:** the two lanes above fire on a session opening or a flush somebody runs for other reasons, while this door opens only because the skill was asked for by name. Not running the skills is the whole control. **Two things differ for `brain-add-document`.** Its tool, `Brain_add_document`, arrives with a later platform release than the other `Brain_*` tools, so it checks for that one by name and stops without it. And it is the one skill here an agent may start on its own, when a document comes up in a session — which is why it asks before it sends, as described under the controls below. `brain-onboard` checks for its own read door, `Brain_overview`, the same way — it too arrives with a later release — and for `Brain_add_document` before it writes. **`brain-extract-components` shares the first of those:** `Brain_record_component` also arrives with a later platform release, so the skill checks for it by name and stops without it. It also needs the repository bound to the checkout by `/fairmind-connect`, because every directory it sends is resolved in that one repository.
 
 ### The agent signature on pull requests — not a capture lane
 
@@ -371,9 +376,9 @@ The routes are separate requests to separate doors, and none is derived from ano
 }
 ```
 
-🔴 **The loop lane has no switch.** There is no key in that file, or anywhere else, that stops it. `"ambient_capture": false` does not reach it: measured on the shipped resolver, that file silences the ambient lane while leaving all three consent classes granted and the loop lane sending. The `consent` block below narrows *what* the loop record carries; it never switches a lane off, and it does not reach the decisions or the harness-audit door at all. The controls that exist today are operational, not configuration: **do not connect a Fairmind MCP in the session**, and **do not run the flush step** — the flush at the end of `/fairmind-loop` and `/harness-audit`, and `/fairmind-sync-insights`. Both are actions a person takes or omits in a session; neither is a decision the repository can record the way `.fairmind-insights.json` records one.
+🔴 **The loop lane has no switch.** There is no key in that file, or anywhere else, that stops it. `"ambient_capture": false` does not reach it: measured on the shipped resolver, that file silences the ambient lane while leaving all three consent classes granted and the loop lane sending. The `consent` block below narrows *what* the loop record carries; it never switches a lane off, and it does not reach the decisions or the harness-audit door at all. The controls that exist today are operational, not configuration: **do not connect a Fairmind MCP in the session, nor leave a usable `fairmind` CLI key on the machine** (`fairmind auth logout`), and **do not run the flush step** — the flush at the end of `/fairmind-loop` and `/harness-audit`, and `/fairmind-sync-insights`. Both are actions a person takes or omits in a session; neither is a decision the repository can record the way `.fairmind-insights.json` records one.
 
-🔴 **The Studio write-back has no switch either, and its control is a person saying no.** There is no key in `.fairmind-insights.json` — or anywhere else — that reaches it, and the `consent` classes below do not touch it. What stands between your journals and the platform is a human approval — but **the two commands differ on how much of a decision that is, and the loop-mode answer is the weaker one**. `/fairmind-develop` puts the write-back behind a request of its own, made after you have already approved the work, so it can be declined on its own terms. `/fairmind-loop` does not: approving a `passed_pending_human` loop is itself the trigger, so in loop mode there is no separate point at which to say no — declining the write-back means declining the approval of the work. Not connecting a Fairmind MCP stops it either way, the same way it stops the loop lane. Stated plainly, in the same terms as the paragraph above: that is a **procedure, not a configuration**. Nothing in the repository records the decision, nothing carries it from one run to the next, and nothing prevents a later run being approved. Its own asymmetry is worth knowing in both directions — with no on-disk queue, a write-back you decline leaves nothing behind that a later sync could pick up.
+🔴 **The Studio write-back has no switch either, and its control is a person saying no.** There is no key in `.fairmind-insights.json` — or anywhere else — that reaches it, and the `consent` classes below do not touch it. What stands between your journals and the platform is a human approval — but **the two commands differ on how much of a decision that is, and the loop-mode answer is the weaker one**. `/fairmind-develop` puts the write-back behind a request of its own, made after you have already approved the work, so it can be declined on its own terms. `/fairmind-loop` does not: approving a `passed_pending_human` loop is itself the trigger, so in loop mode there is no separate point at which to say no — declining the write-back means declining the approval of the work. Leaving Fairmind unreachable (no MCP connected, no usable CLI key) stops it either way, the same way it stops the loop lane. Stated plainly, in the same terms as the paragraph above: that is a **procedure, not a configuration**. Nothing in the repository records the decision, nothing carries it from one run to the next, and nothing prevents a later run being approved. Its own asymmetry is worth knowing in both directions — with no on-disk queue, a write-back you decline leaves nothing behind that a later sync could pick up.
 
 🔴 **The brain write-back has two halves and they do not share a control.** What they share is what the platform does with a requirement, a decision, an issue or a component: each lands as a **proposal** for a person to confirm or reject — though a supersession's replacement does while the decision it replaces stops being current at once. **A document does not** — `brain-add-document` files it, so that sentence stops at the four record kinds and a document's only human check is the one the skill asks for before it sends. `brain-onboard` writes one document, its scope's brief, and a brief a person had confirmed is never overwritten by a regeneration: the new text waits for a person as a revision proposal. And not connecting a Fairmind MCP stops both, the same way it stops the loop lane and the Studio write-back.
 
@@ -381,7 +386,7 @@ The routes are separate requests to separate doors, and none is derived from ano
 
 **The loop half's control is a repository switch and an approval, and the approval is the weaker of the two.** `brain` in `.fairmind-insights.json` — written by `/fairmind-config brain on|off|unset`, with the platform's central policy above it — is a decision the repository records and carries from one run to the next, which is what the skills half has never had. **It binds in the producer**, not only in the command that reads it: the script that builds the payload consults the switch itself, so a caller that never read the instruction cannot send the rows either, and a value present but not a boolean reads as off rather than as consent. Beneath it sits the human gate, and there the loop-mode answer is the same weak one the Studio write-back has: **approving a `passed_pending_human` loop is itself the trigger**, so there is no separate point at which to decline the send without also declining the approval of the work. The command names what it sent, record by record, in the Exit report; that is disclosure after the fact, not consent before it. **The approval covers the loop's own send and nothing else:** `/fairmind-sync-insights` proposes the same rows whenever somebody runs it and asks nobody first, so for that opener the switch is the only control the repository records.
 
-⚠️ **`brain off` is not "these decisions stay on this machine", and it must not be sold as one.** The architecture rows it stops here are the same rows the **loop lane** carries as `decisions`, and 🔴 the loop lane has no switch. Turning `brain` off narrows which doors a decision goes through; it does not keep it on your machine. Nothing short of not connecting a Fairmind MCP does that. **Nor does `brain off` reach `brain-record-decision`:** the switch governs what the loop and `/fairmind-sync-insights` propose, and a decision or an issue a person asks that skill to record goes to the brain whatever the switch says.
+⚠️ **`brain off` is not "these decisions stay on this machine", and it must not be sold as one.** The architecture rows it stops here are the same rows the **loop lane** carries as `decisions`, and 🔴 the loop lane has no switch. Turning `brain` off narrows which doors a decision goes through; it does not keep it on your machine. Nothing short of leaving Fairmind unreachable (no MCP connected, no usable CLI key) does that. **Nor does `brain off` reach `brain-record-decision`:** the switch governs what the loop and `/fairmind-sync-insights` propose, and a decision or an issue a person asks that skill to record goes to the brain whatever the switch says.
 
 ### Central policy
 
@@ -554,6 +559,98 @@ The plugin assumes a Fairmind session workspace rooted at:
 
 The Technical Lead creates this on first run from a Fairmind work package. The other agents read `active-context.json` to resolve `FAIRMIND_BASE` and only write to scoped subpaths — the `validate-fairmind-path` hook will refuse anything outside that scope.
 
+## Fairmind through the CLI
+
+The commands and skills make every Fairmind call themselves (sub-agents never do). They
+can make those calls in two ways:
+
+1. **The `fairmind` CLI.** It is bundled in `cli/` and is used first when it is usable. It
+   calls the same Fairmind MCP server from the shell. Its token lives in the OS
+   credential store (`fairmind auth login`), so no MCP server has to be configured in
+   Claude Code.
+2. **The Fairmind MCP tools** (`mcp__Fairmind__*`), when a per-project MCP entry is
+   configured.
+
+`scripts/fairmind_cli.py` finds the CLI in this order:
+
+1. `$FAIRMIND_CLI`.
+2. `fairmind` on `PATH`.
+3. The bundled Node edition run with any `node` ≥ 20 (nothing to install).
+4. A bundled Go build.
+
+It never reads or prints the token. The `fairmind-cli` skill holds the rule every command
+and skill follows: `tools call <Tool>` with the same JSON arguments, writes only with
+`--yes` and only at the moments the command already writes, and success means exit `0`,
+`ok: true` and no bare `message` refusal.
+
+```bash
+./install-cli.sh                 # Node edition (recommended): npm install -g of cli/node
+./install-cli.sh --go            # or the Go edition into ~/.local/bin
+pbpaste | fairmind auth login    # the project API key from Studio -> your avatar -> Developer
+fairmind auth status
+```
+
+Then run `/fairmind-connect` in each checkout. With no per-project MCP entry it binds the
+repository through the CLI (`--via cli` forces it) and records `"fairmind_transport": "cli"`
+in `.fairmind/active-context.json`. On either transport it also writes the bound project
+into `.fairmind/config.json`, the default the CLI sends when a call names no project.
+
+**`fairmind setup` is not needed with this plugin.** It scaffolds a stand-alone integration
+(a `fairmind-project-context` skill, a generic `fairmind` Copilot agent and an
+instructions block) for tools that run without the plugin: the Copilot coding agent on
+GitHub, Copilot Chat in an IDE, Codex. Under Claude Code or Copilot CLI with this plugin
+installed, `fairmind auth login` plus `/fairmind-connect` is the whole setup. Running
+`fairmind setup` too only adds a second, overlapping set of instructions and a generic agent
+next to the plugin's six.
+
+**What still needs the MCP entry.** The ambient session capture and the judge hook send
+through REST doors using the MCP entry's key, and the CLI never hands its key out. On a
+CLI-only checkout those two lanes stay off. Everything driven by a command (context,
+Studio and brain write-back, `/fairmind-sync-insights`, the `/harness-audit` flush)
+works through the CLI. Playwright and MongoDB remain separate, optional MCP servers.
+
+## GitHub Copilot CLI
+
+The same repository installs in Copilot CLI (verified on 1.0.90):
+
+```bash
+copilot plugin marketplace add FairMind-Gen-AI-Studio/fairmind-coding-cli   # or a local clone path
+copilot plugin install fairmind-coding@fairmind-coding-cli
+```
+
+Then, in each checkout, `fairmind auth login` once per machine and `/fairmind-connect`.
+At session start the plugin tells Copilot to reach Fairmind through the CLI, so no MCP
+entry and no `fairmind setup` are needed.
+
+Nothing has to be exported before starting Copilot. Copilot reads the plugin's
+Claude-format hooks, skills, commands and agents, and five differences are handled
+for you:
+
+| Difference in Copilot | What the plugin does |
+|---|---|
+| `${CLAUDE_PLUGIN_ROOT}` stays literal in command, skill and agent text | the `copilot-compat` hook substitutes it on every `Bash` call and pre-approves the plugin's own script calls |
+| exit 2 on `Stop`/`SubagentStop` is only a warning | `copilot-block` turns it into a block, so the loop gate and the journal rule still stop the turn |
+| a pinned Claude model the account lacks keeps a sub-agent from starting; a description with `: ` in plain YAML drops the agent | Copilot reads `.github/plugin/plugin.json`, which points at `copilot/agents/`. That directory holds the same agents with `model: inherit` and a quoted description, generated by `python3 scripts/sync_copilot_agents.py` (`--check` in CI) |
+| `Edit` carries an apply_patch document, and a sub-agent runs as its own session | the path guard and the trace read the patch headers; `scripts/_copilot_host.py` maps sub-agent sessions to their agent, and the loop gate ignores a sub-agent's own `Stop` |
+| `SubagentStart`/`SessionStart` context is read at the top level | `inject-context` and `copilot-compat` emit it there |
+
+Still different: there are no command banners, because Copilot has no
+`UserPromptExpansion`. Token capture records nothing, because the transcript format
+differs. The ambient capture lane does not run, because it needs a per-project MCP
+entry. The PR-posting commands post nothing, because their signature needs
+`CLAUDE_CODE_SESSION_ID`. Approve `fairmind_connect.py`, `pr_post.py` and Fairmind writes when Copilot
+asks.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `agents/`, `commands/`, `skills/`, `hooks/`, `scripts/` | The plugin. Claude Code and Copilot CLI load it from the repository root |
+| `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | The plugin manifest and the marketplace that makes this repository installable (`fairmind-coding@fairmind-coding-cli`) |
+| `.github/plugin/plugin.json`, `copilot/agents/` | **Generated** by `python3 scripts/sync_copilot_agents.py`: what Copilot CLI reads instead of the above. Edit `agents/` and `.claude-plugin/plugin.json`, then regenerate (`--check` fails when they are out of date) |
+| `cli/` | The `fairmind` CLI (Node and Go editions), copied from `fairmind-cli`. It has its own `README.md`, `CLAUDE.md` and tests (`cd cli/node && npm test`, `cd cli && go test ./...`) |
+| `install-cli.sh` | Installs the CLI from `cli/` (`--go` for the Go edition) |
+
 ## Prerequisites
 
 Required for standalone (loop mode) use:
@@ -562,7 +659,7 @@ Required for standalone (loop mode) use:
 
 Optional — only enable **connected mode** and the corresponding workflows:
 
-- **Fairmind MCP** — `mcp__Fairmind__*` — platform context (projects, stories, requirements, tests, RAG). Absent → agents read local `.fairmind/` and operate standalone.
+- **`fairmind` CLI** (bundled in `cli/`; installed with `./install-cli.sh`, or run from the bundle with Node ≥ 20) **or the Fairmind MCP** — `mcp__Fairmind__*` — platform context (projects, stories, requirements, tests, RAG). Neither → agents read local `.fairmind/` and operate standalone.
 - **Playwright MCP** — the `QA Engineer` and `/fix-frontend-issue` browser workflows.
 - **MongoDB MCP** — `Software Engineer` / `Code Reviewer` for NextJS/MongoDB stacks.
 - **`gh` CLI** on `$PATH` — the GitHub commands.
@@ -589,12 +686,19 @@ guard makes it the point at which editing stops, not a degraded mode. `check-jou
 
 ## Install
 
-From git:
+From this repository, which is its own marketplace (the plugin and the CLI in one place):
 
 ```text
-/plugin marketplace add FairMind-Gen-AI-Studio/fairmind-plugins-public
-/plugin install fairmind-coding@fairmind-plugins
+/plugin marketplace add FairMind-Gen-AI-Studio/fairmind-coding-cli
+/plugin install fairmind-coding@fairmind-coding-cli
 ```
+
+A local clone works too: `/plugin marketplace add /path/to/fairmind-coding-cli`.
+For GitHub Copilot CLI see [GitHub Copilot CLI](#github-copilot-cli). Then
+install the CLI from the same clone (`./install-cli.sh`) and run `fairmind auth login`.
+The plugin has the same name as the one in the public `fairmind-plugins` marketplace, so
+uninstall that one first (`/plugin uninstall fairmind-coding@fairmind-plugins`) to avoid
+two copies of every command.
 
 Verify:
 
@@ -641,4 +745,4 @@ The plugin reads project-level configuration from:
 
 ## License
 
-MIT
+MIT, for the plugin and for the `fairmind` CLI under `cli/` (`cli/LICENSE`).

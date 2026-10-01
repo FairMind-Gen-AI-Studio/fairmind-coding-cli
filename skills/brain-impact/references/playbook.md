@@ -4,6 +4,10 @@ On-demand detail for the `brain-impact` skill: the tools it calls and the fields
 each answer, how to walk dependents without losing count, how the component block is read, and
 a worked example end to end.
 
+> **Transport.** Tools are named here by their MCP spelling (`mcp__Fairmind__<Tool>`). On the
+> CLI transport each one is `fairmind_cli.py tools call <Tool>` with the same arguments, as the
+> skill's own Transport note and the `fairmind-cli` skill describe; nothing below changes.
+
 ## The tool surface
 
 | Tool | Used for | Step |

@@ -5,6 +5,8 @@ description: Use when the requirements of a system that already exists have to b
 
 # Rebuild requirements from what exists
 
+> **Transport.** Every `mcp__Fairmind__<Tool>` call in this skill can go through the `fairmind` CLI instead of an MCP mount — follow the `fairmind-cli` skill. Probe once (`python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py --probe --online`, exit `0` = CLI), then make each call as `python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py tools call <Tool> --args-json '<same arguments>' --json` and read `data`. A step that confirms tools "are in the tool list" checks `fairmind_cli.py tools list --json` for the same names instead; "no Fairmind MCP connected" means neither the CLI nor an MCP mount is usable. Writes keep every confirmation this skill already requires, and carry `--yes` only once it is given.
+
 ## Overview
 
 A system that runs is a system whose requirements were written down once, partly, somewhere

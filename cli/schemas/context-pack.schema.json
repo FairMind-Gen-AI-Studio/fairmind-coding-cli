@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.fairmind.example/agent-api/v1/context-pack.schema.json",
+  "title": "FairMind Context Pack (v1)",
+  "description": "data payload of context:get, context:for-task and context:for-code-change (spec §17).",
+  "type": "object",
+  "required": ["summary", "items", "warnings", "follow_up", "budget"],
+  "properties": {
+    "summary": { "type": "string" },
+    "intent": { "type": "string" },
+    "project": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+    },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "description": "e.g. STALE_REPOSITORY_DATA, REPOSITORY_NOT_BOUND, NO_KNOWLEDGE_FOR_FILES, NO_RELEVANT_CONTEXT, SUPERSEDED_KNOWLEDGE, PROPOSED_KNOWLEDGE, HISTORY_OMITTED, NO_LOCAL_CHANGES" },
+          "message": { "type": "string" },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "follow_up": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "reason"],
+        "properties": { "command": { "type": "string" }, "reason": { "type": "string" } }
+      }
+    },
+    "evidence": { "type": "object" },
+    "budget": {
+      "type": "object",
+      "required": ["requested_tokens", "estimated_tokens", "omitted_items"],
+      "properties": {
+        "requested_tokens": { "type": "integer" },
+        "estimated_tokens": { "type": "integer" },
+        "omitted_items": { "type": "integer" }
+      }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["source", "kind", "id", "title", "status", "why_relevant", "excerpt", "anchors", "provenance"],
+      "properties": {
+        "source": { "enum": ["brain", "studio", "code", "document", "insights"] },
+        "kind": { "type": "string", "description": "decision|requirement|issue|task|story|need|test|document|specification|code" },
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string", "description": "domain status, e.g. taken, superseded, open, active" },
+        "review_state": { "enum": ["confirmed", "proposed", "rejected"] },
+        "superseded_by": { "type": "string" },
+        "why_relevant": { "type": "string" },
+        "excerpt": { "type": "string" },
+        "score": { "type": "number" },
+        "anchors": { "type": "array", "items": { "type": "string" } },
+        "provenance": { "type": "object" }
+      }
+    }
+  }
+}

@@ -4,6 +4,10 @@ On-demand detail for the `brain-rebuild-requirements` skill: the tool surface, t
 heuristics, the natural-key rule, and what each response shape means. Read the parts a run
 actually needs.
 
+> **Transport.** Tools are named here by their MCP spelling (`mcp__Fairmind__<Tool>`). On the
+> CLI transport each one is `fairmind_cli.py tools call <Tool>` with the same arguments, as the
+> skill's own Transport note and the `fairmind-cli` skill describe; nothing below changes.
+
 ## The tool surface
 
 Ten brain tools exist. This skill uses five of them, and **writes with exactly one**.

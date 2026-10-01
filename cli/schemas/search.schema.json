@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.fairmind.example/agent-api/v1/search.schema.json",
+  "title": "FairMind federated search response (v1)",
+  "type": "object",
+  "required": ["ok", "data", "page"],
+  "properties": {
+    "ok": { "const": true },
+    "data": {
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "context-pack.schema.json#/$defs/item", "required": ["score"] } },
+        "warnings": { "type": "array" }
+      }
+    },
+    "page": { "$ref": "#/$defs/page" }
+  },
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": ["limit", "has_more"],
+      "properties": {
+        "cursor": { "type": ["string", "null"] },
+        "limit": { "type": "integer" },
+        "total": { "type": ["integer", "null"] },
+        "has_more": { "type": "boolean" }
+      }
+    }
+  }
+}

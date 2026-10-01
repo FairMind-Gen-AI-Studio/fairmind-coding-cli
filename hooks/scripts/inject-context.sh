@@ -80,6 +80,14 @@ if [ -n "$BASE_PATH" ]; then
   fi
 fi
 
+# Copilot CLI reads SubagentStart's additionalContext at the top level, not under
+# hookSpecificOutput; Claude Code's payload is left exactly as it was.
+if [ -n "${COPILOT_PLUGIN_ROOT:-}" ]; then
+  jq -nc --arg ctx "$INJECT" '{additionalContext: $ctx}' \
+    || fail "the context could not be encoded for delivery"
+  exit 0
+fi
+
 jq -nc --arg ctx "$INJECT" \
   '{hookSpecificOutput: {hookEventName: "SubagentStart", additionalContext: $ctx}}' \
   || fail "the context could not be encoded for delivery"

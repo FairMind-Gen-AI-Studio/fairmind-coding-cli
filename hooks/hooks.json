@@ -31,6 +31,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/copilot-compat.py pretool",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit",
         "hooks": [
           {
@@ -41,7 +51,7 @@
         ]
       },
       {
-        "matcher": "Task",
+        "matcher": "Task|Agent",
         "hooks": [
           {
             "type": "command",
@@ -53,8 +63,12 @@
     ],
     "SubagentStart": [
       {
-        "matcher": "",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT\"/scripts/_copilot_host.py record",
+            "timeout": 5
+          },
           {
             "type": "command",
             "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/inject-context.sh",
@@ -66,7 +80,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -78,11 +91,10 @@
     ],
     "Stop": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/loop-check.sh",
+            "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/copilot-block.sh \"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/loop-check.sh",
             "statusMessage": "Running loop gate...",
             "timeout": 600
           },
@@ -97,11 +109,10 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/check-journal.sh",
+            "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/copilot-block.sh \"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/check-journal.sh",
             "statusMessage": "Checking journal compliance...",
             "timeout": 600
           },
@@ -122,7 +133,6 @@
     ],
     "SessionStart": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -133,13 +143,17 @@
             "type": "command",
             "command": "\"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/session-start-insights.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PLUGIN_ROOT\"/hooks/scripts/copilot-compat.py session",
+            "timeout": 5
           }
         ]
       }
     ],
     "SessionEnd": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",

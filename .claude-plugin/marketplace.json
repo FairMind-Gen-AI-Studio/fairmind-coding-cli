@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "fairmind-coding-cli",
+  "description": "The fairmind-coding plugin together with the fairmind CLI it can use instead of a Fairmind MCP server.",
+  "owner": {
+    "name": "Fairmind"
+  },
+  "plugins": [
+    {
+      "name": "fairmind-coding",
+      "description": "Fairmind coding workflow (agents, skills, hooks, commands). Reaches Fairmind through the bundled `fairmind` CLI when it is available, or through a per-project Fairmind MCP entry; runs standalone otherwise.",
+      "category": "development",
+      "source": "./"
+    }
+  ]
+}

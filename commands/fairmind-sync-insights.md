@@ -1,6 +1,6 @@
 ---
 description: Flush any unflushed Agentic Insights payloads (loop stats, agent decisions, harness-audit runs) to project-context and any unproposed architecture decisions to the company brain, on demand and independent of a loop close
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py:*), Read, mcp__Fairmind__Insights_record_harness_audit, mcp__Fairmind__Insights_record_loop_stats, mcp__Fairmind__Insights_record_agent_decisions, mcp__Fairmind__Brain_record_decision
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py:*), Read, mcp__Fairmind__Insights_record_harness_audit, mcp__Fairmind__Insights_record_loop_stats, mcp__Fairmind__Insights_record_agent_decisions, mcp__Fairmind__Brain_record_decision
 ---
 
 # fairmind-sync-insights
@@ -55,7 +55,12 @@ whatever is pending.
    between the script and you — the MCP tools themselves have no body cap.
 
 2. **Send each non-null category through its own MCP tool** — never batch them into one
-   call, since a partial failure must be attributable to exactly one category:
+   call, since a partial failure must be attributable to exactly one category. **When the
+   `fairmind` CLI is usable** (`python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py --probe --online`
+   exits `0`; see the `fairmind-cli` skill), send each one with
+   `python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py --send <Tool> --from <out> --category <category> [--batch <i>]`
+   instead of the MCP tool — same tool, same payload, and its exit `0` is the "success" step 3
+   waits for:
    - `loop` → `mcp__Fairmind__Insights_record_loop_stats`
    - `decisions` → `mcp__Fairmind__Insights_record_agent_decisions`
    - `audit` → `mcp__Fairmind__Insights_record_harness_audit`
@@ -169,7 +174,7 @@ change or not at all.
 
 - `insights_flush_payload.py` is stdlib Python 3 only — no install step, no network
   calls; it never calls the network itself, only reads/writes local JSON.
-- When the Fairmind MCP is not connected at all, this command has nothing useful to do —
+- When neither the `fairmind` CLI nor the Fairmind MCP is usable, this command has nothing useful to do —
   report that plainly and stop; nothing on disk is touched (no `--commit` without a real
   send), so a later run with Fairmind connected picks up exactly the same pending set.
 - This command complements, it does not replace, the terminal flush `/fairmind-loop`

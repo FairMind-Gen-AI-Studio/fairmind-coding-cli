@@ -1,0 +1,48 @@
+# Installs the fairmind CLI for the GitHub Copilot cloud (coding) agent.
+#
+# Prerequisites (repository or organization settings):
+#   - Agents secret   FAIRMIND_TOKEN            read-only FairMind JWT
+#   - Agents variable FAIRMIND_API_URL          https URL of the FairMind Agent API
+#   - Variable        FAIRMIND_CLI_URL          URL of the fairmind_<ver>_linux_amd64.tar.gz release
+#   - Variable        FAIRMIND_CLI_SHA256       its SHA-256 (from SHA256SUMS)
+#   - Copilot firewall: add the FairMind Agent API host to the custom allowlist
+#
+# The local devbridge cannot be used here: the cloud agent needs the real,
+# server-side FairMind Agent API.
+name: "Copilot Setup Steps"
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+  pull_request:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+
+jobs:
+  copilot-setup-steps:          # the job name is required by Copilot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fairmind CLI (verified checksum)
+        env:
+          FAIRMIND_CLI_URL: ${{ vars.FAIRMIND_CLI_URL }}
+          FAIRMIND_CLI_SHA256: ${{ vars.FAIRMIND_CLI_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$FAIRMIND_CLI_URL" && test -n "$FAIRMIND_CLI_SHA256"
+          curl -fsSL "$FAIRMIND_CLI_URL" -o /tmp/fairmind.tar.gz
+          echo "$FAIRMIND_CLI_SHA256  /tmp/fairmind.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/fairmind.tar.gz -C /tmp
+          install -m 0755 /tmp/fairmind_*/fairmind "$HOME/.local/bin/fairmind"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Check FairMind reachability (never prints the token)
+        env:
+          FAIRMIND_TOKEN: ${{ secrets.FAIRMIND_TOKEN }}
+          FAIRMIND_API_URL: ${{ vars.FAIRMIND_API_URL }}
+          FAIRMIND_AGENT: github-copilot
+        run: fairmind auth status --json || echo "::warning::FairMind not reachable; the agent will work without project context"

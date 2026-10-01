@@ -49,6 +49,8 @@ REPOSITORY_URL = "repository_url"
 REPOSITORY_BRANCH = "repository_branch"
 PROJECT_ID = "project_id"
 BOUND_AT = "bound_at"
+#: `"cli"` when `/fairmind-connect --via cli` made the binding; absent for MCP.
+TRANSPORT = "fairmind_transport"
 
 
 def context_path(root):

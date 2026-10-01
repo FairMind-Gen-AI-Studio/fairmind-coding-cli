@@ -1,13 +1,13 @@
 ---
 description: Audit the current repo against the Loop Readiness criteria catalog (81 criteria across 9 pillars, 5 Loop Readiness dimensions), render a self-contained HTML report, and flush the run to Agentic Insights when Fairmind is connected
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/audit_run_meta.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/harness_audit.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/harness_audit_report.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py:*), Read, mcp__Fairmind__Insights_record_harness_audit
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/audit_run_meta.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/harness_audit.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/harness_audit_report.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py:*), Read, mcp__Fairmind__Insights_record_harness_audit
 ---
 
 # harness-audit
 
 Capture run-identity metadata, run the harness-readiness audit engine against the
 current repo, render its `summary.json` into a single self-contained HTML report,
-and — when the Fairmind MCP is connected — flush the run to Agentic Insights.
+and — when Fairmind is reachable through the `fairmind` CLI or the MCP — flush the run to Agentic Insights.
 
 ## Usage
 
@@ -77,7 +77,16 @@ and — when the Fairmind MCP is connected — flush the run to Agentic Insights
      deterministically from the three files steps 1-2 wrote — `run-meta.json`
      for repo identity, `summary.json` for the pillar rollups, and
      `assessment.jsonl` for the per-criterion verdicts underneath them); do
-     not re-derive or edit its fields here. Only after that MCP call returns success, run:
+     not re-derive or edit its fields here. **When the `fairmind` CLI is usable**
+     (`python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py --probe --online` exits `0`;
+     see the `fairmind-cli` skill), send it through the CLI instead, from a file rather
+     than from stdout:
+     ```bash
+     python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py --emit audit --out
+     python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py --send Insights_record_harness_audit --from <out> --category audit
+     ```
+     where `<out>` is the path the first line prints; the second exiting `0` is the
+     success meant below. Only after that MCP call returns success, run:
      ```bash
      python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/insights_flush_payload.py --commit audit
      ```
@@ -101,11 +110,11 @@ and — when the Fairmind MCP is connected — flush the run to Agentic Insights
      deliberately re-send, use `/fairmind-sync-insights`'s backfill: delete
      the cursor — the server upserts.
 
-   **When the Fairmind MCP tool is not connected (standalone), the MCP call
-   and `--commit audit` are both SKIPPED** — a mode, not an error — and the
+   **When neither the `fairmind` CLI nor the Fairmind MCP tool is usable
+   (standalone), the send and `--commit audit` are both SKIPPED** — a mode, not an error — and the
    pending payload is picked up later by `/fairmind-sync-insights`. Report
    the skip plainly in the end-of-run summary (e.g.
-   "Insights flush skipped: standalone, no Fairmind MCP connection" as an
+   "Insights flush skipped: standalone, no Fairmind CLI or MCP connection" as an
    explicit line alongside the report path and top-line numbers). The audit
    run and the local HTML report always succeed on their own regardless of
    whether this last step ran.

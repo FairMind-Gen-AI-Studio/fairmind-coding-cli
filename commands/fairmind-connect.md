@@ -1,6 +1,6 @@
 ---
-description: Connect this checkout to its Fairmind project — verify the per-project MCP entry and the key, pre-flight the tenant, and bind the repository to the one the platform ingested using its catalog identity where the installed client supports it
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_connect.py:*), Read, AskUserQuestion, mcp__Fairmind__General_list_projects
+description: Connect this checkout to its Fairmind project — verify the per-project MCP entry (or the `fairmind` CLI) and the key, pre-flight the tenant, and bind the repository to the one the platform ingested using its catalog identity where the installed client supports it
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_connect.py:*), Bash(python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py:*), Read, AskUserQuestion, mcp__Fairmind__General_list_projects
 ---
 
 # /fairmind-connect
@@ -15,9 +15,28 @@ continue to use the directory name.
 that edits it on someone's behalf is a command that can point a credential
 somewhere. When something is missing it prints the exact line to run.
 
+**Two transports, one binding.** With a per-project Fairmind MCP entry the
+engine checks that entry and its key, as it always did. Without one, and with
+the `fairmind` CLI installed (or runnable from the copy bundled with this
+plugin), it does the same checks through the CLI: `fairmind auth status` for
+the key, `Insights_get_tenant_health` for the tenant, `Insights_bind_repository`
+for the bind. The CLI keeps its key in the OS credential store and never hands
+it out. The report's first heading says which transport ran. Force one with
+`--via mcp` or `--via cli`. An MCP entry wins in `auto` because the ambient
+capture lanes send with that entry's key, so the binding they key on has to be
+made with the same key. Those lanes stay off on a CLI-only checkout.
+
 **The binding is per machine, not per repository.** It lands in
 `.fairmind/active-context.json`, which is gitignored, so each teammate runs this
 in their own clone.
+
+**It also tells the CLI which project this is.** On either transport the bound
+project id goes into `.fairmind/config.json` (only its `project` key; anything
+else there is kept), which the `fairmind` CLI sends whenever a call names no
+project. That is what keeps the brain skills and free-form calls from failing
+with `PROJECT_REQUIRED` on a key that sees several projects, and it is why this
+command, not `fairmind setup`, is the step a plugin user runs. A file that
+already names a different project is left alone and the report says so.
 
 ## Step 1 — run it
 
@@ -35,7 +54,7 @@ that can drift from what actually happened.
 | Exit | Meaning | What you do |
 | --- | --- | --- |
 | `0` | Bound. | Relay the report. Nothing else. |
-| `1` | One or more traps, each printed with the fix. | Relay the report. Do not attempt the fixes yourself — every one of them is either a Studio action or an edit to the user's own MCP config. |
+| `1` | One or more traps, each printed with the fix. | Relay the report. Do not attempt the fixes yourself — every one of them is either a Studio action, an edit to the user's own MCP config, or a `fairmind auth login` the user runs in their own terminal (never ask for the key in the chat). |
 | `3` | The key is not scoped to a project and none was named. | Go to step 3. |
 | `4` | The platform did not answer (503, network, VPN). | Say so and offer to re-run. Nothing was changed. |
 
@@ -43,8 +62,9 @@ that can drift from what actually happened.
 
 The key carries no `projectId` claim, so the project has to be named once.
 
-1. Call `mcp__Fairmind__General_list_projects`. Each row carries `id` and
-   `name` — **`id`, not `_id` and not `project_id`**.
+1. Call `mcp__Fairmind__General_list_projects` — or, when the report's first
+   heading was `Fairmind CLI`, `python3 "${CLAUDE_PLUGIN_ROOT}"/scripts/fairmind_cli.py tools call General_list_projects --json`
+   and read `data`. Each row carries `id` and `name` — **`id`, not `_id` and not `project_id`**.
 2. Ask the user with `AskUserQuestion`, one question, the project names as the
    options. Do not guess from the directory name: that a folder is called
    `payments-api` is exactly the signal this command exists to stop trusting.
