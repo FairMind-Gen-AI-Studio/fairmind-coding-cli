@@ -63,7 +63,12 @@ fi
 # the harness does not set). Derive a journal-filename-safe label: drop a plugin
 # scope prefix ("fairmind-coding:"), lowercase, spaces → hyphens. Absent → a
 # generic label; identity drives the label, never the enforcement decision.
-AGENT_TYPE=$(printf '%s' "$PAYLOAD" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
+# Copilot CLI names a plugin agent by its file and sends the display name apart
+# (agent_display_name); rebuild Claude Code's spelling so the label is the same.
+AGENT_TYPE=$(printf '%s' "$PAYLOAD" | jq -r '
+  if ((.agent_display_name // "") != "") and ((.agent_type // "") != "")
+  then ((if (.agent_type | contains(":")) then (.agent_type | split(":")[0]) + ":" else "" end) + .agent_display_name)
+  else (.agent_type // empty) end' 2>/dev/null) || AGENT_TYPE=""
 AGENT=$(printf '%s' "$AGENT_TYPE" | sed 's/^[^:]*://' | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
 [ -z "$AGENT" ] && AGENT="subagent"
 

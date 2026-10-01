@@ -50,6 +50,29 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# GitHub Copilot CLI reports its edits under the Claude names (Write/Edit) but not
+# with Claude's input: `Edit` may carry an apply_patch document (a STRING, one
+# `*** Add|Update|Delete File: <path>` / `*** Move to: <path>` header per file),
+# and its file editors name the target `path`, not `file_path`. A patch can
+# touch several files, so each target is re-checked by this same script as if it
+# had arrived alone, and the first refusal refuses the whole edit.
+if TARGETS=$(printf '%s' "$INPUT" | jq -r '
+    if (.tool_input | type) == "string" then
+      .tool_input | split("\n")[]
+      | (capture("^\\*\\*\\* (Add|Update|Delete) File: (?<p>.+)$") // capture("^\\*\\*\\* Move to: (?<p>.+)$") // empty)
+      | .p
+    elif (.tool_input.file_path // null) == null and (.tool_input.path | type) == "string" then
+      .tool_input.path
+    else empty end' 2>/dev/null) && [ -n "$TARGETS" ]; then
+  while IFS= read -r TARGET; do
+    [ -n "$TARGET" ] || continue
+    jq -nc --arg p "$TARGET" '{tool_input: {file_path: $p}}' | "$0"
+    RC=$?
+    [ "$RC" -eq 2 ] && exit 2
+  done <<< "$TARGETS"
+  exit 0
+fi
+
 if ! FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null); then
   [ -f "$CONTEXT_FILE" ] || exit 0
   echo "fairmind path guard: the PreToolUse payload on stdin is not valid JSON, so the write target cannot be read. Refusing the write rather than letting it bypass the .fairmind/ scope check." >&2

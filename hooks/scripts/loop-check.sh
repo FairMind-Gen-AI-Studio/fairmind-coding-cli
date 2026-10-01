@@ -60,6 +60,14 @@ try:
 except Exception:
     pass" 2>/dev/null || true)"
 
+# Copilot CLI fires a Stop for every sub-agent session too, under the sub-agent's
+# own id. Only the session driving the loop may be gated by it (or come to own
+# it), so a known sub-agent's Stop is not the gate's business.
+if [ -n "${COPILOT_PLUGIN_ROOT:-}" ] && [ -n "$SID" ] &&
+   python3 "$PLUGIN_ROOT/scripts/_copilot_host.py" is-subagent "$SID" 2>/dev/null; then
+  exit 0
+fi
+
 OUT=$(python3 "$PLUGIN_ROOT/scripts/run_gate_checks.py" --cwd "$CWD" --session-id "$SID" 2>&1)
 CODE=$?
 

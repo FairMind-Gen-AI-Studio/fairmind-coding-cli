@@ -82,6 +82,11 @@ if not lc.live or lc.mode != "loop" or lc.ledger_dir is not None:
     sys.exit(0)
 
 raw = p.get("agent_type") or ""
+# GitHub Copilot CLI names a plugin agent by its FILE (plugin:tech-lead) and
+# sends the display name apart (agent_display_name); Claude Code names it by the
+# display name. Rebuild the Claude spelling so one role reads the same on both.
+if p.get("agent_display_name") and isinstance(raw, str) and raw:
+    raw = (raw.split(":")[0] + ":" if ":" in raw else "") + p["agent_display_name"]
 if not raw:
     sys.exit(0)
 # Same normalization check-journal.sh applies, so one role spells identically in

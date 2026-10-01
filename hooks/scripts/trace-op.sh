@@ -76,6 +76,19 @@ mode = lc.mode
 # propagated there, so without reading it every subagent op would ledger as
 # "main". Precedence: payload agent_type -> env CLAUDE_AGENT_NAME -> "main".
 agent = p.get("agent_type") or sys.argv[2] or "main"
+# GitHub Copilot CLI names a plugin agent by its FILE (plugin:tech-lead) and
+# sends the display name apart (agent_display_name); Claude Code names it by the
+# display name. Rebuild the Claude spelling so one role reads the same on both.
+if not p.get("agent_type"):
+    # Copilot CLI: a sub-agent tool call carries the sub-agent session id and
+    # no agent name; _copilot_host maps the one to the other (None elsewhere).
+    try:
+        from _copilot_host import subagent_name
+        agent = subagent_name(p.get("session_id")) or agent
+    except Exception:
+        pass
+if p.get("agent_display_name") and isinstance(p.get("agent_type"), str):
+    agent = (p["agent_type"].split(":")[0] + ":" if ":" in p["agent_type"] else "") + p["agent_display_name"]
 
 tool = p.get("tool_name") or "unknown"
 ti = p.get("tool_input") or {}
@@ -110,6 +123,14 @@ if isinstance(ti, dict):
             # mutate op still gets tr().
             target = raw if kind == "mutate" else tr(raw)
             break
+targets = [target]
+# GitHub Copilot CLI: an Edit may carry an apply_patch document (a string) that
+# names one or more files in its headers. Each file is its own mutate row, so
+# mutation-set attribution sees every path the patch touched.
+if isinstance(ti, str):
+    found = [a or b for a, b in re.findall(
+        r"^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", ti, re.M)]
+    targets = [f.strip() for f in found if f.strip()] or [tr(ti)]
 
 # A ROUTED context names the directory its rows belong in, and the resolver owns
 # that decision — ONE branch here, and no per-destination boolean to keep in
@@ -130,7 +151,8 @@ else:
     safe = re.sub(r"[^A-Za-z0-9_.-]", "-", str(ref)) or "session"
     trace_file = os.path.join(cwd, ".fairmind", "trace", safe + ".jsonl")
 os.makedirs(os.path.dirname(trace_file), exist_ok=True)
-rec = {
+for target in targets:
+  rec = {
     "ts": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
     "session_id": p.get("session_id") or "",
     "mode": mode,
@@ -138,7 +160,7 @@ rec = {
     "tool": tool,
     "kind": kind,
     "target": target,
-}
+  }
 # Mark a ROUTED row on the artifact, not only in the resolver: without it a row
 # diverted off a closed loop is byte-identical to a genuinely interactive one and
 # the distinction dies in-process. The keys are DERIVED by the resolver
@@ -148,14 +170,14 @@ rec = {
 # FOLLOWS — which is what makes a later re-attribution (or the operator signal)
 # derivable from the ledger rather than from a live re-resolution that can only
 # describe now.
-rec.update(lc.row_stamp)
+  rec.update(lc.row_stamp)
 # Append + window-safe cap/rollover as ONE locked unit (shared, best-effort; a
 # rotation failure never breaks the hook). Serializing them closes the race where
 # a concurrently appended in-window row is clobbered between the rotation snapshot
 # and its replace. Rotation rolls ONLY rows older than the loop started_at; a row
 # with ts >= started_at is read whole mid-loop and must NEVER be dropped.
 # (No apostrophes in this comment: it lives inside the bash single-quoted block.)
-append_row(trace_file, json.dumps(rec), lc.started_at)
+  append_row(trace_file, json.dumps(rec), lc.started_at)
 ' "$CWD" "${CLAUDE_AGENT_NAME:-main}" "$SCRIPTS_DIR" || exit 0
 
 exit 0
